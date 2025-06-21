@@ -1,8 +1,8 @@
-# PostgreSQL MCP Server (Enhanced)
+# PostgreSQL Multi-Environment MCP Server
 
-A Model Context Protocol server that provides both read and write access to PostgreSQL databases. This server enables LLMs to inspect database schemas, execute queries, modify data, and create/modify database schema objects.
+A Model Context Protocol server that provides both read and write access to PostgreSQL databases across multiple environments. This server enables LLMs to inspect database schemas, execute queries, modify data, create/modify database schema objects, and switch between different database environments (production, staging, demo, development, etc.).
 
-> **Note:** This is an enhanced version of the original [PostgreSQL MCP server](https://github.com/modelcontextprotocol/servers/tree/main/src/postgres) by Anthropic. The original server provides read-only access, while this enhanced version adds write capabilities and schema management.
+> **Note:** This is a multi-environment version based on the [Enhanced PostgreSQL MCP Server](https://github.com/garethcott/enhanced-postgres-mcp-server) by Gareth Cottrell, which itself is based on the original [PostgreSQL MCP server](https://github.com/modelcontextprotocol/servers/tree/main/src/postgres) by Anthropic. The original server provides read-only access to a single database, the enhanced version adds write capabilities and schema management, and this multi-environment version adds support for unlimited database environments with runtime configuration.
 
 ## Components
 
@@ -94,15 +94,162 @@ The server provides schema information for each table in the database:
   - Includes column names and data types
   - Automatically discovered from database metadata
 
+## Configuration
+
+The server supports multiple database configurations passed directly from the MCP server configuration. This allows you to switch between different databases (production, staging, demo, development, or any custom environments) without restarting the server.
+
+### Configuration Structure
+
+The configuration supports an arbitrary number of environments using a standardized structure. Configuration is provided as a JSON string via command line argument.
+
+The configuration structure is:
+
+```json
+{
+  "environments": [
+    {
+      "name": "production",
+      "displayName": "Production",
+      "database": {
+        "type": "postgres",
+        "host": "prod-db.example.com",
+        "port": 5432,
+        "database": "prod_app",
+        "username": "prod_user",
+        "password": "prod_password",
+        "ssl": true,
+        "poolSize": 10
+      }
+    },
+    {
+      "name": "staging",
+      "displayName": "Staging",
+      "database": {
+        "type": "postgres",
+        "host": "staging-db.example.com",
+        "port": 5432,
+        "database": "staging_app",
+        "username": "staging_user",
+        "password": "staging_password",
+        "ssl": true,
+        "poolSize": 5
+      }
+    },
+    {
+      "name": "demo",
+      "displayName": "Demo",
+      "database": {
+        "type": "postgres",
+        "host": "demo-db.example.com",
+        "port": 5432,
+        "database": "demo_app",
+        "username": "demo_user",
+        "password": "demo_password",
+        "ssl": true,
+        "poolSize": 3
+      }
+    },
+    {
+      "name": "development",
+      "displayName": "Development",
+      "database": {
+        "type": "postgres",
+        "connectionString": "postgresql://dev_user:dev_password@localhost:5432/myapp_dev",
+        "poolSize": 2
+      }
+    }
+  ]
+}
+```
+
+### Adding Custom Environments
+
+To add new environments (e.g., `testing`, `qa`, `preprod`), simply add them to the `environments` array:
+
+```json
+{
+  "name": "testing",
+  "displayName": "Testing Environment",
+  "database": {
+    "type": "postgres",
+    "host": "test-db.example.com",
+    "port": 5432,
+    "database": "test_app",
+    "username": "test_user",
+    "password": "test_password",
+    "ssl": true,
+    "poolSize": 2
+  }
+}
+```
+
+
+
 ## Usage with Claude Desktop
 
-To use this server with the Claude Desktop app, add the following configuration to the "mcpServers" section of your `claude_desktop_config.json`:
+Pass the configuration as a JSON string argument:
+
+```json
+{
+  "mcpServers": {
+    "postgres": {
+      "command": "node",
+      "args": [
+        "dist/index.js",
+        "{\"environments\":[{\"name\":\"production\",\"displayName\":\"Production\",\"database\":{\"type\":\"postgres\",\"host\":\"prod-db.example.com\",\"port\":5432,\"database\":\"prod_app\",\"username\":\"prod_user\",\"password\":\"prod_password\",\"ssl\":true,\"poolSize\":10}},{\"name\":\"staging\",\"displayName\":\"Staging\",\"database\":{\"type\":\"postgres\",\"host\":\"staging-db.example.com\",\"port\":5432,\"database\":\"staging_app\",\"username\":\"staging_user\",\"password\":\"staging_password\",\"ssl\":true,\"poolSize\":5}},{\"name\":\"development\",\"displayName\":\"Development\",\"database\":{\"type\":\"postgres\",\"connectionString\":\"postgresql://dev_user:dev_password@localhost:5432/myapp_dev\",\"poolSize\":2}}]}"
+      ]
+    }
+  }
+}
+```
+
+**For better readability, the configuration JSON (when formatted) looks like:**
+
+```json
+{
+  "environments": [
+    {
+      "name": "production",
+      "displayName": "Production", 
+      "database": {
+        "type": "postgres",
+        "host": "prod-db.example.com",
+        "port": 5432,
+        "database": "prod_app",
+        "username": "prod_user",
+        "password": "prod_password",
+        "ssl": true,
+        "poolSize": 10
+      }
+    },
+    {
+      "name": "staging",
+      "displayName": "Staging",
+      "database": {
+        "type": "postgres", 
+        "host": "staging-db.example.com",
+        "port": 5432,
+        "database": "staging_app",
+        "username": "staging_user",
+        "password": "staging_password",
+        "ssl": true,
+        "poolSize": 5
+      }
+    },
+    {
+      "name": "development",
+      "displayName": "Development",
+      "database": {
+        "type": "postgres",
+        "connectionString": "postgresql://dev_user:dev_password@localhost:5432/myapp_dev",
+        "poolSize": 2
+      }
+    }
+  ]
+}
+```
 
 ### Docker
-
-* when running docker on macos, use host.docker.internal if the server is running on the host network (eg localhost)
-* username/password can be added to the postgresql url with `postgresql://user:password@host:port/db-name`
-* add `?sslmode=no-verify` if you need to bypass SSL certificate verification
 
 ```json
 {
@@ -112,34 +259,29 @@ To use this server with the Claude Desktop app, add the following configuration 
       "args": [
         "run", 
         "-i", 
-        "--rm", 
-        "mcp/postgres", 
-        "postgresql://host.docker.internal:5432/mydb"]
-    }
-  }
-}
-```
-
-### NPX
-
-```json
-{
-  "mcpServers": {
-    "postgres": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-postgres",
-        "postgresql://localhost/mydb"
+        "--rm",
+        "mcp/postgres-multi",
+        "{\"environments\":[{\"name\":\"production\",\"displayName\":\"Production\",\"database\":{\"type\":\"postgres\",\"host\":\"prod-db.example.com\",\"port\":5432,\"database\":\"prod_app\",\"username\":\"prod_user\",\"password\":\"prod_password\",\"ssl\":true,\"poolSize\":10}}]}"
       ]
     }
   }
 }
 ```
 
-Replace `/mydb` with your database name.
-
 ## Example Usage
+
+### Database Management
+```
+# List all available database configurations
+/listDatabases
+
+# Switch to a specific database
+/switchDatabase database="production"
+/switchDatabase database="staging"
+/switchDatabase database="demo"
+/switchDatabase database="development"
+/switchDatabase database="testing"  # Custom environment
+```
 
 ### Query Data
 ```
@@ -177,7 +319,7 @@ Replace `/mydb` with your database name.
 Docker:
 
 ```sh
-docker build -t mcp/postgres -f Dockerfile . 
+docker build -t mcp/postgres-multi -f Dockerfile . 
 ```
 
 ## Security Considerations
