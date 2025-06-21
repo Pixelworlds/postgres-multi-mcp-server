@@ -143,32 +143,41 @@ export class ToolHandlers {
   }
 
   private async handleQuery(sql: string): Promise<CallToolResult> {
-    const pool = this.dbManager.getCurrentPool();
-    const client = await pool.connect();
-
     try {
-      await client.query('BEGIN TRANSACTION READ ONLY');
-      const result = await client.query(sql);
+      const result = await this.dbManager.executeWithConnection(async client => {
+        await client.query('BEGIN TRANSACTION READ ONLY');
+        try {
+          const queryResult = await client.query(sql);
+          await client.query('ROLLBACK');
+          return queryResult;
+        } catch (error) {
+          await client.query('ROLLBACK');
+          throw error;
+        }
+      });
+
       return {
         content: [{ type: 'text', text: JSON.stringify(result.rows, null, 2) }],
         isError: false,
       };
     } catch (error) {
       return createQueryErrorResponse(error, sql);
-    } finally {
-      client.query('ROLLBACK').catch(error => console.warn('Could not roll back transaction:', error));
-      client.release();
     }
   }
 
   private async handleExecute(sql: string): Promise<CallToolResult> {
-    const pool = this.dbManager.getCurrentPool();
-    const client = await pool.connect();
-
     try {
-      await client.query('BEGIN');
-      const result = await client.query(sql);
-      await client.query('COMMIT');
+      const result = await this.dbManager.executeWithConnection(async client => {
+        await client.query('BEGIN');
+        try {
+          const queryResult = await client.query(sql);
+          await client.query('COMMIT');
+          return queryResult;
+        } catch (error) {
+          await client.query('ROLLBACK');
+          throw error;
+        }
+      });
 
       return {
         content: [
@@ -188,28 +197,30 @@ export class ToolHandlers {
         isError: false,
       };
     } catch (error) {
-      await client.query('ROLLBACK').catch(err => console.warn('Could not roll back transaction:', err));
       return createQueryErrorResponse(error, sql);
-    } finally {
-      client.release();
     }
   }
 
   private async handleInsert(table: string, data: Record<string, any>): Promise<CallToolResult> {
-    const pool = this.dbManager.getCurrentPool();
-    const client = await pool.connect();
-
     try {
-      const columns = Object.keys(data);
-      const values = Object.values(data);
-      const placeholders = values.map((_, i) => `$${i + 1}`).join(', ');
+      const result = await this.dbManager.executeWithConnection(async client => {
+        const columns = Object.keys(data);
+        const values = Object.values(data);
+        const placeholders = values.map((_, i) => `$${i + 1}`).join(', ');
 
-      await client.query('BEGIN');
-      const result = await client.query(
-        `INSERT INTO ${table} (${columns.join(', ')}) VALUES (${placeholders}) RETURNING *`,
-        values
-      );
-      await client.query('COMMIT');
+        await client.query('BEGIN');
+        try {
+          const queryResult = await client.query(
+            `INSERT INTO ${table} (${columns.join(', ')}) VALUES (${placeholders}) RETURNING *`,
+            values
+          );
+          await client.query('COMMIT');
+          return queryResult;
+        } catch (error) {
+          await client.query('ROLLBACK');
+          throw error;
+        }
+      });
 
       return {
         content: [
@@ -221,28 +232,30 @@ export class ToolHandlers {
         isError: false,
       };
     } catch (error) {
-      await client.query('ROLLBACK').catch(err => console.warn('Could not roll back transaction:', err));
       return createTableErrorResponse(error, table, 'INSERT');
-    } finally {
-      client.release();
     }
   }
 
   private async handleUpdate(table: string, data: Record<string, any>, where: string): Promise<CallToolResult> {
-    const pool = this.dbManager.getCurrentPool();
-    const client = await pool.connect();
-
     try {
-      const setClause = Object.entries(data)
-        .map(([col, _], i) => `${col} = $${i + 1}`)
-        .join(', ');
+      const result = await this.dbManager.executeWithConnection(async client => {
+        const setClause = Object.entries(data)
+          .map(([col, _], i) => `${col} = $${i + 1}`)
+          .join(', ');
 
-      await client.query('BEGIN');
-      const result = await client.query(
-        `UPDATE ${table} SET ${setClause} WHERE ${where} RETURNING *`,
-        Object.values(data)
-      );
-      await client.query('COMMIT');
+        await client.query('BEGIN');
+        try {
+          const queryResult = await client.query(
+            `UPDATE ${table} SET ${setClause} WHERE ${where} RETURNING *`,
+            Object.values(data)
+          );
+          await client.query('COMMIT');
+          return queryResult;
+        } catch (error) {
+          await client.query('ROLLBACK');
+          throw error;
+        }
+      });
 
       return {
         content: [
@@ -254,21 +267,23 @@ export class ToolHandlers {
         isError: false,
       };
     } catch (error) {
-      await client.query('ROLLBACK').catch(err => console.warn('Could not roll back transaction:', err));
       return createTableErrorResponse(error, table, 'UPDATE');
-    } finally {
-      client.release();
     }
   }
 
   private async handleDelete(table: string, where: string): Promise<CallToolResult> {
-    const pool = this.dbManager.getCurrentPool();
-    const client = await pool.connect();
-
     try {
-      await client.query('BEGIN');
-      const result = await client.query(`DELETE FROM ${table} WHERE ${where} RETURNING *`);
-      await client.query('COMMIT');
+      const result = await this.dbManager.executeWithConnection(async client => {
+        await client.query('BEGIN');
+        try {
+          const queryResult = await client.query(`DELETE FROM ${table} WHERE ${where} RETURNING *`);
+          await client.query('COMMIT');
+          return queryResult;
+        } catch (error) {
+          await client.query('ROLLBACK');
+          throw error;
+        }
+      });
 
       return {
         content: [
@@ -280,10 +295,7 @@ export class ToolHandlers {
         isError: false,
       };
     } catch (error) {
-      await client.query('ROLLBACK').catch(err => console.warn('Could not roll back transaction:', err));
       return createTableErrorResponse(error, table, 'DELETE');
-    } finally {
-      client.release();
     }
   }
 
@@ -292,20 +304,25 @@ export class ToolHandlers {
     columns: Array<{ name: string; type: string; constraints?: string }>,
     constraints?: Array<string>
   ): Promise<CallToolResult> {
-    const pool = this.dbManager.getCurrentPool();
-    const client = await pool.connect();
-
     try {
-      const columnDefinitions = columns
-        .map(col => `${col.name} ${col.type}${col.constraints ? ' ' + col.constraints : ''}`)
-        .join(', ');
+      const result = await this.dbManager.executeWithConnection(async client => {
+        const columnDefinitions = columns
+          .map(col => `${col.name} ${col.type}${col.constraints ? ' ' + col.constraints : ''}`)
+          .join(', ');
 
-      const tableConstraints = constraints ? ', ' + constraints.join(', ') : '';
-      const createTableSQL = `CREATE TABLE ${tableName} (${columnDefinitions}${tableConstraints})`;
+        const tableConstraints = constraints ? ', ' + constraints.join(', ') : '';
+        const createTableSQL = `CREATE TABLE ${tableName} (${columnDefinitions}${tableConstraints})`;
 
-      await client.query('BEGIN');
-      await client.query(createTableSQL);
-      await client.query('COMMIT');
+        await client.query('BEGIN');
+        try {
+          await client.query(createTableSQL);
+          await client.query('COMMIT');
+          return { sql: createTableSQL };
+        } catch (error) {
+          await client.query('ROLLBACK');
+          throw error;
+        }
+      });
 
       return {
         content: [
@@ -314,7 +331,7 @@ export class ToolHandlers {
             text: JSON.stringify(
               {
                 message: `Table ${tableName} created successfully`,
-                sql: createTableSQL,
+                sql: result.sql,
               },
               null,
               2
@@ -324,10 +341,7 @@ export class ToolHandlers {
         isError: false,
       };
     } catch (error) {
-      await client.query('ROLLBACK').catch(err => console.warn('Could not roll back transaction:', err));
       return createTableOperationErrorResponse(error, tableName, 'CREATE TABLE');
-    } finally {
-      client.release();
     }
   }
 
@@ -339,11 +353,9 @@ export class ToolHandlers {
     body: string,
     options?: string
   ): Promise<CallToolResult> {
-    const pool = this.dbManager.getCurrentPool();
-    const client = await pool.connect();
-
     try {
-      const createFunctionSQL = `
+      const result = await this.dbManager.executeWithConnection(async client => {
+        const createFunctionSQL = `
         CREATE OR REPLACE FUNCTION ${name}(${parameters})
         RETURNS ${returnType}
         LANGUAGE ${language}
@@ -353,9 +365,16 @@ export class ToolHandlers {
         $$;
       `;
 
-      await client.query('BEGIN');
-      await client.query(createFunctionSQL);
-      await client.query('COMMIT');
+        await client.query('BEGIN');
+        try {
+          await client.query(createFunctionSQL);
+          await client.query('COMMIT');
+          return { sql: createFunctionSQL };
+        } catch (error) {
+          await client.query('ROLLBACK');
+          throw error;
+        }
+      });
 
       return {
         content: [
@@ -364,7 +383,7 @@ export class ToolHandlers {
             text: JSON.stringify(
               {
                 message: `Function ${name} created successfully`,
-                sql: createFunctionSQL,
+                sql: result.sql,
               },
               null,
               2
@@ -374,10 +393,7 @@ export class ToolHandlers {
         isError: false,
       };
     } catch (error) {
-      await client.query('ROLLBACK').catch(err => console.warn('Could not roll back transaction:', err));
       return createFunctionErrorResponse(error, name);
-    } finally {
-      client.release();
     }
   }
 
@@ -390,14 +406,12 @@ export class ToolHandlers {
     forEach: string,
     condition?: string
   ): Promise<CallToolResult> {
-    const pool = this.dbManager.getCurrentPool();
-    const client = await pool.connect();
-
     try {
-      const eventStr = events.join(' OR ');
-      const whenClause = condition ? `WHEN (${condition})` : '';
+      const result = await this.dbManager.executeWithConnection(async client => {
+        const eventStr = events.join(' OR ');
+        const whenClause = condition ? `WHEN (${condition})` : '';
 
-      const createTriggerSQL = `
+        const createTriggerSQL = `
         CREATE TRIGGER ${name}
         ${when} ${eventStr}
         ON ${tableName}
@@ -406,9 +420,16 @@ export class ToolHandlers {
         EXECUTE FUNCTION ${functionName}();
       `;
 
-      await client.query('BEGIN');
-      await client.query(createTriggerSQL);
-      await client.query('COMMIT');
+        await client.query('BEGIN');
+        try {
+          await client.query(createTriggerSQL);
+          await client.query('COMMIT');
+          return { sql: createTriggerSQL };
+        } catch (error) {
+          await client.query('ROLLBACK');
+          throw error;
+        }
+      });
 
       return {
         content: [
@@ -417,7 +438,7 @@ export class ToolHandlers {
             text: JSON.stringify(
               {
                 message: `Trigger ${name} created successfully on table ${tableName}`,
-                sql: createTriggerSQL,
+                sql: result.sql,
               },
               null,
               2
@@ -427,10 +448,7 @@ export class ToolHandlers {
         isError: false,
       };
     } catch (error) {
-      await client.query('ROLLBACK').catch(err => console.warn('Could not roll back transaction:', err));
       return createTriggerErrorResponse(error, name, tableName);
-    } finally {
-      client.release();
     }
   }
 
@@ -442,23 +460,28 @@ export class ToolHandlers {
     type?: string,
     where?: string
   ): Promise<CallToolResult> {
-    const pool = this.dbManager.getCurrentPool();
-    const client = await pool.connect();
-
     try {
-      const uniqueStr = unique ? 'UNIQUE' : '';
-      const typeStr = type ? `USING ${type}` : '';
-      const whereClause = where ? `WHERE ${where}` : '';
+      const result = await this.dbManager.executeWithConnection(async client => {
+        const uniqueStr = unique ? 'UNIQUE' : '';
+        const typeStr = type ? `USING ${type}` : '';
+        const whereClause = where ? `WHERE ${where}` : '';
 
-      const createIndexSQL = `
+        const createIndexSQL = `
         CREATE ${uniqueStr} INDEX ${indexName}
         ON ${tableName} ${typeStr} (${columns.join(', ')})
         ${whereClause}
       `;
 
-      await client.query('BEGIN');
-      await client.query(createIndexSQL);
-      await client.query('COMMIT');
+        await client.query('BEGIN');
+        try {
+          await client.query(createIndexSQL);
+          await client.query('COMMIT');
+          return { sql: createIndexSQL };
+        } catch (error) {
+          await client.query('ROLLBACK');
+          throw error;
+        }
+      });
 
       return {
         content: [
@@ -467,7 +490,7 @@ export class ToolHandlers {
             text: JSON.stringify(
               {
                 message: `Index ${indexName} created successfully on table ${tableName}`,
-                sql: createIndexSQL,
+                sql: result.sql,
               },
               null,
               2
@@ -477,23 +500,25 @@ export class ToolHandlers {
         isError: false,
       };
     } catch (error) {
-      await client.query('ROLLBACK').catch(err => console.warn('Could not roll back transaction:', err));
       return createIndexErrorResponse(error, indexName, tableName);
-    } finally {
-      client.release();
     }
   }
 
   private async handleAlterTable(tableName: string, operation: string, details: string): Promise<CallToolResult> {
-    const pool = this.dbManager.getCurrentPool();
-    const client = await pool.connect();
-
     try {
-      const alterTableSQL = `ALTER TABLE ${tableName} ${operation} ${details}`;
+      const result = await this.dbManager.executeWithConnection(async client => {
+        const alterTableSQL = `ALTER TABLE ${tableName} ${operation} ${details}`;
 
-      await client.query('BEGIN');
-      await client.query(alterTableSQL);
-      await client.query('COMMIT');
+        await client.query('BEGIN');
+        try {
+          await client.query(alterTableSQL);
+          await client.query('COMMIT');
+          return { sql: alterTableSQL };
+        } catch (error) {
+          await client.query('ROLLBACK');
+          throw error;
+        }
+      });
 
       return {
         content: [
@@ -502,7 +527,7 @@ export class ToolHandlers {
             text: JSON.stringify(
               {
                 message: `Table ${tableName} altered successfully`,
-                sql: alterTableSQL,
+                sql: result.sql,
               },
               null,
               2
@@ -512,10 +537,7 @@ export class ToolHandlers {
         isError: false,
       };
     } catch (error) {
-      await client.query('ROLLBACK').catch(err => console.warn('Could not roll back transaction:', err));
       return createTableOperationErrorResponse(error, tableName, operation);
-    } finally {
-      client.release();
     }
   }
 }
