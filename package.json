@@ -1,6 +1,6 @@
 {
   "name": "@pixelworlds/postgres-multi-mcp-server",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "Multi-environment PostgreSQL MCP server with read and write capabilities. Based on @modelcontextprotocol/server-postgres by Anthropic.",
   "license": "MIT",
   "author": "Pixelworlds",
@@ -24,7 +24,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc && chmod +x dist/*.js",
+    "build": "tsc && esbuild dist/index.js --bundle --platform=node --format=esm --external:pg --external:@modelcontextprotocol/sdk --outfile=dist/index.js --allow-overwrite && chmod +x dist/index.js",
     "prepare": "npm run build",
     "watch": "tsc --watch",
     "start": "node dist/index.js",
@@ -38,6 +38,7 @@
   "devDependencies": {
     "@types/node": "^20.11.5",
     "@types/pg": "^8.11.10",
+    "esbuild": "^0.25.5",
     "shx": "^0.3.4",
     "typescript": "^5.6.2"
   },
