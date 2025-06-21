@@ -36,22 +36,38 @@ export class DatabaseManager {
     const dbConfig = this.databases[this.currentDatabase];
     const connectionString = buildConnectionString(dbConfig, this.envVars);
 
-    return new Client({
+    const clientConfig: any = {
       connectionString,
       connectionTimeoutMillis: 10000,
-    });
+    };
+
+    if (dbConfig.ssl) {
+      clientConfig.ssl = {
+        rejectUnauthorized: false,
+      };
+    }
+
+    return new Client(clientConfig);
   }
 
   getCurrentPool(): Pool {
     const dbConfig = this.databases[this.currentDatabase];
     const connectionString = buildConnectionString(dbConfig, this.envVars);
 
-    return new Pool({
+    const poolConfig: any = {
       connectionString,
       max: 1,
       connectionTimeoutMillis: 10000,
       idleTimeoutMillis: 30000,
-    });
+    };
+
+    if (dbConfig.ssl) {
+      poolConfig.ssl = {
+        rejectUnauthorized: false,
+      };
+    }
+
+    return new Pool(poolConfig);
   }
 
   getPools(): Record<string, Pool> {

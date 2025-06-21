@@ -108,9 +108,5 @@ export function buildConnectionString(dbConfig: DatabaseConfig, envVars: Record<
   }
   connectionString += `${host}:${port}/${database}`;
 
-  if (dbConfig.ssl) {
-    connectionString += '?sslmode=require';
-  }
-
   return connectionString;
 }
