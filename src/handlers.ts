@@ -1,12 +1,14 @@
 import { CallToolRequest, CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { DatabaseManager } from './database.js';
+
 import { Config } from './config.js';
+import { DatabaseManager } from './database.js';
+import {
+    createFunctionErrorResponse, createIndexErrorResponse, createQueryErrorResponse, createTableErrorResponse,
+    createTableOperationErrorResponse, createTriggerErrorResponse
+} from './errorHandling.js';
 
 export class ToolHandlers {
-  constructor(
-    private dbManager: DatabaseManager,
-    private config: Config
-  ) {}
+  constructor(private dbManager: DatabaseManager, private config: Config) {}
 
   async handleToolCall(request: CallToolRequest): Promise<CallToolResult> {
     const { name, arguments: args } = request.params;
@@ -14,42 +16,32 @@ export class ToolHandlers {
     switch (name) {
       case 'switchDatabase':
         return this.handleSwitchDatabase(args?.database as string);
-      
+
       case 'listDatabases':
         return this.handleListDatabases();
-      
+
       case 'query':
         return this.handleQuery(args?.sql as string);
-      
+
       case 'execute':
         return this.handleExecute(args?.sql as string);
-      
+
       case 'insert':
-        return this.handleInsert(
-          args?.table as string,
-          args?.data as Record<string, any>
-        );
-      
+        return this.handleInsert(args?.table as string, args?.data as Record<string, any>);
+
       case 'update':
-        return this.handleUpdate(
-          args?.table as string,
-          args?.data as Record<string, any>,
-          args?.where as string
-        );
-      
+        return this.handleUpdate(args?.table as string, args?.data as Record<string, any>, args?.where as string);
+
       case 'delete':
-        return this.handleDelete(
-          args?.table as string,
-          args?.where as string
-        );
-      
+        return this.handleDelete(args?.table as string, args?.where as string);
+
       case 'createTable':
         return this.handleCreateTable(
           args?.tableName as string,
           args?.columns as Array<{ name: string; type: string; constraints?: string }>,
           args?.constraints as Array<string>
         );
-      
+
       case 'createFunction':
         return this.handleCreateFunction(
           args?.name as string,
@@ -59,7 +51,7 @@ export class ToolHandlers {
           args?.body as string,
           args?.options as string
         );
-      
+
       case 'createTrigger':
         return this.handleCreateTrigger(
           args?.name as string,
@@ -70,7 +62,7 @@ export class ToolHandlers {
           args?.forEach as string,
           args?.condition as string
         );
-      
+
       case 'createIndex':
         return this.handleCreateIndex(
           args?.tableName as string,
@@ -80,14 +72,10 @@ export class ToolHandlers {
           args?.type as string,
           args?.where as string
         );
-      
+
       case 'alterTable':
-        return this.handleAlterTable(
-          args?.tableName as string,
-          args?.operation as string,
-          args?.details as string
-        );
-      
+        return this.handleAlterTable(args?.tableName as string, args?.operation as string, args?.details as string);
+
       default:
         throw new Error(`Unknown tool: ${name}`);
     }
@@ -95,7 +83,7 @@ export class ToolHandlers {
 
   private async handleSwitchDatabase(database: string): Promise<CallToolResult> {
     this.dbManager.switchDatabase(database);
-    
+
     return {
       content: [
         {
@@ -157,7 +145,7 @@ export class ToolHandlers {
   private async handleQuery(sql: string): Promise<CallToolResult> {
     const pool = this.dbManager.getCurrentPool();
     const client = await pool.connect();
-    
+
     try {
       await client.query('BEGIN TRANSACTION READ ONLY');
       const result = await client.query(sql);
@@ -166,7 +154,7 @@ export class ToolHandlers {
         isError: false,
       };
     } catch (error) {
-      throw error;
+      return createQueryErrorResponse(error, sql);
     } finally {
       client.query('ROLLBACK').catch(error => console.warn('Could not roll back transaction:', error));
       client.release();
@@ -176,7 +164,7 @@ export class ToolHandlers {
   private async handleExecute(sql: string): Promise<CallToolResult> {
     const pool = this.dbManager.getCurrentPool();
     const client = await pool.connect();
-    
+
     try {
       await client.query('BEGIN');
       const result = await client.query(sql);
@@ -201,7 +189,7 @@ export class ToolHandlers {
       };
     } catch (error) {
       await client.query('ROLLBACK').catch(err => console.warn('Could not roll back transaction:', err));
-      throw error;
+      return createQueryErrorResponse(error, sql);
     } finally {
       client.release();
     }
@@ -210,7 +198,7 @@ export class ToolHandlers {
   private async handleInsert(table: string, data: Record<string, any>): Promise<CallToolResult> {
     const pool = this.dbManager.getCurrentPool();
     const client = await pool.connect();
-    
+
     try {
       const columns = Object.keys(data);
       const values = Object.values(data);
@@ -234,7 +222,7 @@ export class ToolHandlers {
       };
     } catch (error) {
       await client.query('ROLLBACK').catch(err => console.warn('Could not roll back transaction:', err));
-      throw error;
+      return createTableErrorResponse(error, table, 'INSERT');
     } finally {
       client.release();
     }
@@ -243,7 +231,7 @@ export class ToolHandlers {
   private async handleUpdate(table: string, data: Record<string, any>, where: string): Promise<CallToolResult> {
     const pool = this.dbManager.getCurrentPool();
     const client = await pool.connect();
-    
+
     try {
       const setClause = Object.entries(data)
         .map(([col, _], i) => `${col} = $${i + 1}`)
@@ -267,7 +255,7 @@ export class ToolHandlers {
       };
     } catch (error) {
       await client.query('ROLLBACK').catch(err => console.warn('Could not roll back transaction:', err));
-      throw error;
+      return createTableErrorResponse(error, table, 'UPDATE');
     } finally {
       client.release();
     }
@@ -276,7 +264,7 @@ export class ToolHandlers {
   private async handleDelete(table: string, where: string): Promise<CallToolResult> {
     const pool = this.dbManager.getCurrentPool();
     const client = await pool.connect();
-    
+
     try {
       await client.query('BEGIN');
       const result = await client.query(`DELETE FROM ${table} WHERE ${where} RETURNING *`);
@@ -293,7 +281,7 @@ export class ToolHandlers {
       };
     } catch (error) {
       await client.query('ROLLBACK').catch(err => console.warn('Could not roll back transaction:', err));
-      throw error;
+      return createTableErrorResponse(error, table, 'DELETE');
     } finally {
       client.release();
     }
@@ -306,7 +294,7 @@ export class ToolHandlers {
   ): Promise<CallToolResult> {
     const pool = this.dbManager.getCurrentPool();
     const client = await pool.connect();
-    
+
     try {
       const columnDefinitions = columns
         .map(col => `${col.name} ${col.type}${col.constraints ? ' ' + col.constraints : ''}`)
@@ -337,7 +325,7 @@ export class ToolHandlers {
       };
     } catch (error) {
       await client.query('ROLLBACK').catch(err => console.warn('Could not roll back transaction:', err));
-      throw error;
+      return createTableOperationErrorResponse(error, tableName, 'CREATE TABLE');
     } finally {
       client.release();
     }
@@ -353,7 +341,7 @@ export class ToolHandlers {
   ): Promise<CallToolResult> {
     const pool = this.dbManager.getCurrentPool();
     const client = await pool.connect();
-    
+
     try {
       const createFunctionSQL = `
         CREATE OR REPLACE FUNCTION ${name}(${parameters})
@@ -387,7 +375,7 @@ export class ToolHandlers {
       };
     } catch (error) {
       await client.query('ROLLBACK').catch(err => console.warn('Could not roll back transaction:', err));
-      throw error;
+      return createFunctionErrorResponse(error, name);
     } finally {
       client.release();
     }
@@ -404,7 +392,7 @@ export class ToolHandlers {
   ): Promise<CallToolResult> {
     const pool = this.dbManager.getCurrentPool();
     const client = await pool.connect();
-    
+
     try {
       const eventStr = events.join(' OR ');
       const whenClause = condition ? `WHEN (${condition})` : '';
@@ -440,7 +428,7 @@ export class ToolHandlers {
       };
     } catch (error) {
       await client.query('ROLLBACK').catch(err => console.warn('Could not roll back transaction:', err));
-      throw error;
+      return createTriggerErrorResponse(error, name, tableName);
     } finally {
       client.release();
     }
@@ -456,7 +444,7 @@ export class ToolHandlers {
   ): Promise<CallToolResult> {
     const pool = this.dbManager.getCurrentPool();
     const client = await pool.connect();
-    
+
     try {
       const uniqueStr = unique ? 'UNIQUE' : '';
       const typeStr = type ? `USING ${type}` : '';
@@ -490,7 +478,7 @@ export class ToolHandlers {
       };
     } catch (error) {
       await client.query('ROLLBACK').catch(err => console.warn('Could not roll back transaction:', err));
-      throw error;
+      return createIndexErrorResponse(error, indexName, tableName);
     } finally {
       client.release();
     }
@@ -499,7 +487,7 @@ export class ToolHandlers {
   private async handleAlterTable(tableName: string, operation: string, details: string): Promise<CallToolResult> {
     const pool = this.dbManager.getCurrentPool();
     const client = await pool.connect();
-    
+
     try {
       const alterTableSQL = `ALTER TABLE ${tableName} ${operation} ${details}`;
 
@@ -525,7 +513,7 @@ export class ToolHandlers {
       };
     } catch (error) {
       await client.query('ROLLBACK').catch(err => console.warn('Could not roll back transaction:', err));
-      throw error;
+      return createTableOperationErrorResponse(error, tableName, operation);
     } finally {
       client.release();
     }

@@ -96,10 +96,12 @@ export function buildConnectionString(dbConfig: DatabaseConfig, envVars: Record<
   let connectionString = 'postgresql://';
 
   if (username) {
-    connectionString += username;
+    const encodedUsername = encodeURIComponent(username);
+    connectionString += encodedUsername;
 
     if (password) {
-      connectionString += `:${password}`;
+      const encodedPassword = encodeURIComponent(password);
+      connectionString += `:${encodedPassword}`;
     }
 
     connectionString += '@';

@@ -3,7 +3,7 @@ import { DatabaseManager } from './database.js';
 
 export class ResourceHandlers {
   private readonly SCHEMA_PATH = 'schema';
-  private readonly resourceBaseUrl = new URL('postgres://');
+  private readonly resourceBaseUrl = new URL('postgres://localhost/');
 
   constructor(private dbManager: DatabaseManager) {}
 
@@ -29,7 +29,17 @@ export class ResourceHandlers {
   }
 
   async handleReadResource(request: ReadResourceRequest): Promise<ReadResourceResult> {
-    const resourceUrl = new URL(request.params.uri);
+    if (!request.params.uri) {
+      throw new Error('Resource URI is required');
+    }
+
+    let resourceUrl: URL;
+    try {
+      resourceUrl = new URL(request.params.uri);
+    } catch (error) {
+      throw new Error(`Invalid resource URI: ${request.params.uri}`);
+    }
+
     const pathComponents = resourceUrl.pathname.split('/');
     const schema = pathComponents.pop();
     const tableName = pathComponents.pop();
